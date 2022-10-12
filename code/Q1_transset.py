@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 
-class imgDataset(Dataset):
+class transDataset(Dataset):
 
     def __init__(self, X, y):
         'Initialization'
@@ -32,16 +32,16 @@ class imgDataset(Dataset):
 
     transform = T.Compose([
         T.ToPILImage(),
+        T.RandomHorizontalFlip(0.999),
         T.ToTensor()])
 
 def show_images(images, nmax=64):
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.set_xticks([]); ax.set_yticks([])
     ax.imshow(make_grid((images.detach()[:nmax]), nrow=8).permute(1, 2, 0))
-    plt.savefig("pics.png")
     
 def show_batch(dl, nmax=64):
     for images in dl:
-        show_images(images[0], nmax)   
+        show_images(images, nmax)   
         break 
 

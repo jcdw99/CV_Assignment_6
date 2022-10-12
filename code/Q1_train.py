@@ -2,6 +2,8 @@ import matplotlib
 matplotlib.use("Agg")
 from Q1_model import Q1_model
 from Q1_dataset import imgDataset, show_batch
+from Q1_transset import transDataset
+from Q1_rotate import rotateDataset
 import Q1_admin
 from sklearn.metrics import classification_report
 from torch.utils.data import random_split
@@ -15,9 +17,13 @@ import numpy as np
 import argparse
 import torch
 import time
+import torch.utils.data
 from torchvision.utils import make_grid
-from torchvision.utils import save_image
-   
+from torchvision.utils import save_image   
+from sklearn.metrics import confusion_matrix
+import seaborn as sn
+import pandas as pd
+
 if __name__ == '__main__':
     # construct the argument parser and parse the arguments
     ap = argparse.ArgumentParser()
@@ -28,9 +34,9 @@ if __name__ == '__main__':
     args = vars(ap.parse_args())
 
     # define training hyperparameters
-    INIT_LR = 1e-3
-    BATCH_SIZE = 64
-    EPOCHS = 20
+    INIT_LR = 0.001
+    BATCH_SIZE = 64*3
+    EPOCHS = 35
     # define the train and val splits
     TRAIN_SPLIT = 0.75
     VAL_SPLIT = 1 - TRAIN_SPLIT
@@ -38,21 +44,24 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     results, data = Q1_admin.get_data('train')
-    transformed_dataset = imgDataset(results, data)
 
-    numTrainSamples = int(len(transformed_dataset) * TRAIN_SPLIT)
-    numValSamples = int(len(transformed_dataset) * VAL_SPLIT)
+    origdataset = imgDataset(results, data)
+    transformed_dataset = transDataset(results, data)
+    rotateddataset = rotateDataset(results, data)
+    increased_dataset = torch.utils.data.ConcatDataset([transformed_dataset, origdataset, rotateddataset])
+    numTrainSamples = int(len(increased_dataset) * TRAIN_SPLIT)
+    numValSamples = int(len(increased_dataset) * VAL_SPLIT)
 
-    (trainData, valData) = random_split(transformed_dataset,
+    (trainData, valData) = random_split(increased_dataset,
         [numTrainSamples, numValSamples],
-        generator=torch.Generator().manual_seed(42))
+        generator=torch.Generator())
 
     trainDataLoader = DataLoader(trainData, BATCH_SIZE, shuffle=True, num_workers=1, pin_memory=True)
     valDataLoader = DataLoader(valData, BATCH_SIZE, shuffle=True, num_workers=1, pin_memory=True)
     resultss, dataa = Q1_admin.get_data('test')
 
     testData = imgDataset(resultss, dataa)
-    testDataLoader = DataLoader(testData, BATCH_SIZE, num_workers=1, pin_memory=True)
+    testDataLoader = DataLoader(testData, 1, num_workers=1, pin_memory=True)
 
     trainSteps = len(trainDataLoader.dataset) // BATCH_SIZE # type: ignore
     valSteps = len(valDataLoader.dataset) // BATCH_SIZE # type: ignore
@@ -64,7 +73,7 @@ if __name__ == '__main__':
         classes=9).to(device)
     # initialize our optimizer and loss function
     opt = Adam(model.parameters(), lr=INIT_LR)
-    lossFn = nn.NLLLoss()
+    lossFn = nn.CrossEntropyLoss()
 
     # initialize a dictionary to store training history
     H = {
@@ -162,14 +171,24 @@ if __name__ == '__main__':
             pred = model(x)
             preds.extend(pred.argmax(axis=1).cpu().numpy())
 
-    # generate a classification report
-    dataa = [testData.directory_to_class.get(i) for i in dataa]
 
-    print(classification_report(np.array(np.array(dataa)).astype(int),
-	np.array(preds).astype(int), target_names=testData.label_names))
+    classes =  ['Coast', 'Forest', 'Highway', 'Kitchen', 'Mountain', 'Office', 'Store', 'Street', 'Suburb']
+    intlabels = [classes.index(j) for j in dataa]
+
+    cf_matrix = confusion_matrix(intlabels, preds)
+    df_cm = pd.DataFrame(cf_matrix, index = [i for i in classes],
+                        columns = [i for i in classes])
+    plt.figure(figsize = (12,7))
+    sn.heatmap(df_cm, annot=True, fmt='.0f')
+    plt.title("Heatmap of Model Suggestion and True Label")
+    plt.xlabel("Model Suggestion")
+    plt.ylabel("True Label")
+    plt.savefig('confmat.png')
+    print(classification_report(intlabels, preds, target_names=testData.label_names))
     # plot the training loss and accuracy
     plt.figure()
     plt.plot(H["train_loss"], label="train_loss")
+    plt.ylim((0,3))
     plt.plot(H["val_loss"], label="val_loss")
     plt.plot(H["train_acc"], label="train_acc")
     plt.plot(H["val_acc"], label="val_acc")
